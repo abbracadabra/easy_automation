@@ -4,6 +4,7 @@ import logging
 from collections import defaultdict, deque
 from typing import Optional
 
+from easy_automation.core.cache import reset_snapshot_cache
 from easy_automation.core.detector import detect_interrupt, detect_state
 from easy_automation.core.graph import Graph
 from easy_automation.core.registry import get_function
@@ -90,6 +91,9 @@ def goto(
         last_state = None
 
     for step in range(max_steps):
+        # 0. 清空 iteration cache
+        reset_snapshot_cache()
+
         # 1. 检测当前状态
         current = detect_state(graph)
 
