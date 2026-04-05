@@ -1,7 +1,7 @@
 import pytest
 from easy_automation.core.registry import register, clear_registry
 from easy_automation.core.context import set_context
-from easy_automation.core.cache import get_snapshot_cache, reset_snapshot_cache
+from easy_automation.core.cache import get_frame_cache, reset_snapshot_cache
 from easy_automation.core.graph import Graph, State, Transition
 from easy_automation.core.planner import goto
 
@@ -15,16 +15,16 @@ def clean_registry():
 
 def test_cache_basic():
     reset_snapshot_cache()
-    cache = get_snapshot_cache()
+    cache = get_frame_cache()
     cache["key"] = "value"
-    assert get_snapshot_cache()["key"] == "value"
+    assert get_frame_cache()["key"] == "value"
 
 
 def test_cache_reset():
     reset_snapshot_cache()
-    get_snapshot_cache()["key"] = "value"
+    get_frame_cache()["key"] = "value"
     reset_snapshot_cache()
-    assert "key" not in get_snapshot_cache()
+    assert "key" not in get_frame_cache()
 
 
 def test_cache_cleared_each_iteration():
@@ -34,7 +34,7 @@ def test_cache_cleared_each_iteration():
 
     @register()
     def m_a():
-        cache = get_snapshot_cache()
+        cache = get_frame_cache()
         cache["screenshot"] = f"screenshot_{state_holder['step']}"
         cache["btn_pos"] = (100, 200)
         return state_holder["current"] == "a"
@@ -45,7 +45,7 @@ def test_cache_cleared_each_iteration():
 
     @register()
     def go_b():
-        cache = get_snapshot_cache()
+        cache = get_frame_cache()
         # action 能读到同一 iteration 中 matcher 写入的数据
         iteration_caches.append(dict(cache))
         state_holder["current"] = "b"
@@ -77,7 +77,7 @@ def test_cache_not_leak_across_iterations():
 
     @register()
     def m_a():
-        cache = get_snapshot_cache()
+        cache = get_frame_cache()
         seen_keys.append(list(cache.keys()))
         # 每次 iteration 的 matcher 都写不同的 key
         cache[f"iter_{state_holder['step']}"] = True
@@ -119,7 +119,7 @@ def test_shared_matcher_cached_once():
 
     @register()
     def match_common_element():
-        cache = get_snapshot_cache()
+        cache = get_frame_cache()
         if "common_element_pos" not in cache:
             # 模拟 opencv 匹配，只应执行一次
             match_count["cv_match"] += 1
