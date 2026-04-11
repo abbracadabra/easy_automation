@@ -1,7 +1,14 @@
-from easy_automation import register
+from easy_automation import StateMachine
 
 
-@register()
 def is_home():
     return True
 
+
+functions = {"is_home": is_home}
+
+machine = StateMachine(
+    {"states": {"home": {"matchers": ["is_home"]}}, "transitions": [], "interrupts": []},
+    functions=functions,
+)
+machine.validate()

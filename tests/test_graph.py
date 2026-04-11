@@ -1,13 +1,5 @@
 import pytest
-from easy_automation.core.registry import register, clear_registry
 from easy_automation.core.graph import load_graph, validate_graph_functions
-
-
-@pytest.fixture(autouse=True)
-def clean_registry():
-    clear_registry()
-    yield
-    clear_registry()
 
 
 def test_load_from_dict():
@@ -58,15 +50,14 @@ def test_load_empty_matchers():
         })
 
 
-def test_validate_functions_all_registered():
-    @register()
+def test_validate_functions_all_present():
     def m_a():
         return True
 
-    @register()
     def go_b():
         pass
 
+    functions = {"m_a": m_a, "go_b": go_b}
     graph = load_graph({
         "states": {"a": {"matchers": ["m_a"]}},
         "transitions": [
@@ -74,7 +65,7 @@ def test_validate_functions_all_registered():
         ],
         "interrupts": [],
     })
-    validate_graph_functions(graph)  # 不应抛异常
+    validate_graph_functions(graph, functions)
 
 
 def test_validate_functions_missing():
@@ -84,4 +75,4 @@ def test_validate_functions_missing():
         "interrupts": [],
     })
     with pytest.raises(ValueError, match="校验失败"):
-        validate_graph_functions(graph)
+        validate_graph_functions(graph, {})

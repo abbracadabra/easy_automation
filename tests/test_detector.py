@@ -1,55 +1,48 @@
-import pytest
-from easy_automation.core.registry import register, clear_registry
 from easy_automation.core.graph import Graph, State, Interrupt
 from easy_automation.core.detector import detect_state, detect_interrupt
 
 
-@pytest.fixture(autouse=True)
-def clean_registry():
-    clear_registry()
-    yield
-    clear_registry()
-
-
 def test_detect_single_state():
-    @register()
     def always_true():
         return True
 
+    functions = {"always_true": always_true}
     graph = Graph(
         states={"page_a": State(name="page_a", matchers=["always_true"])},
         transitions=[],
         interrupts=[],
     )
-    assert detect_state(graph) == "page_a"
+    assert detect_state(graph, functions) == "page_a"
 
 
 def test_detect_unknown_when_no_match():
-    @register()
     def always_false():
         return False
 
+    functions = {"always_false": always_false}
     graph = Graph(
         states={"page_a": State(name="page_a", matchers=["always_false"])},
         transitions=[],
         interrupts=[],
     )
-    assert detect_state(graph) == "unknown"
+    assert detect_state(graph, functions) == "unknown"
 
 
 def test_most_matchers_wins():
-    @register()
     def check_url():
         return True
 
-    @register()
     def check_element():
         return True
 
-    @register()
     def check_popup():
         return True
 
+    functions = {
+        "check_url": check_url,
+        "check_element": check_element,
+        "check_popup": check_popup,
+    }
     graph = Graph(
         states={
             "page_a": State(name="page_a", matchers=["check_url", "check_element"]),
@@ -61,19 +54,18 @@ def test_most_matchers_wins():
         transitions=[],
         interrupts=[],
     )
-    assert detect_state(graph) == "page_a_with_popup"
+    assert detect_state(graph, functions) == "page_a_with_popup"
 
 
 def test_partial_match_not_candidate():
     """只有部分 matcher 通过的状态不是候选"""
-    @register()
     def is_true():
         return True
 
-    @register()
     def is_false():
         return False
 
+    functions = {"is_true": is_true, "is_false": is_false}
     graph = Graph(
         states={
             "page_a": State(name="page_a", matchers=["is_true"]),
@@ -82,15 +74,14 @@ def test_partial_match_not_candidate():
         transitions=[],
         interrupts=[],
     )
-    # page_b 有一个 matcher 失败，只有 page_a 是候选
-    assert detect_state(graph) == "page_a"
+    assert detect_state(graph, functions) == "page_a"
 
 
 def test_detect_interrupt():
-    @register()
     def has_popup():
         return True
 
+    functions = {"has_popup": has_popup}
     graph = Graph(
         states={},
         transitions=[],
@@ -98,16 +89,16 @@ def test_detect_interrupt():
             Interrupt(matchers=["has_popup"], action="close_popup"),
         ],
     )
-    result = detect_interrupt(graph)
+    result = detect_interrupt(graph, functions)
     assert result is not None
     assert result.action == "close_popup"
 
 
 def test_detect_no_interrupt():
-    @register()
     def has_popup():
         return False
 
+    functions = {"has_popup": has_popup}
     graph = Graph(
         states={},
         transitions=[],
@@ -115,18 +106,17 @@ def test_detect_no_interrupt():
             Interrupt(matchers=["has_popup"], action="close_popup"),
         ],
     )
-    assert detect_interrupt(graph) is None
+    assert detect_interrupt(graph, functions) is None
 
 
 def test_interrupt_most_matchers_wins():
-    @register()
     def has_coupon():
         return True
 
-    @register()
     def has_upgrade():
         return True
 
+    functions = {"has_coupon": has_coupon, "has_upgrade": has_upgrade}
     graph = Graph(
         states={},
         transitions=[],
@@ -135,5 +125,5 @@ def test_interrupt_most_matchers_wins():
             Interrupt(matchers=["has_coupon", "has_upgrade"], action="close_all"),
         ],
     )
-    result = detect_interrupt(graph)
+    result = detect_interrupt(graph, functions)
     assert result.action == "close_all"

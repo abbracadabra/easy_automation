@@ -11,7 +11,7 @@ Mock Demo: 模拟滴滴租车比价流程
 import logging
 import random
 
-from easy_automation import StateMachine, register, get_context
+from easy_automation import StateMachine, get_context
 
 logging.basicConfig(level=logging.DEBUG, format="%(name)s - %(message)s")
 
@@ -28,31 +28,24 @@ ui = {
 # ============================================================
 # Matchers
 # ============================================================
-@register()
 def is_home():
     return ui["current_page"] == "home"
 
-@register()
 def is_rental_page():
     return ui["current_page"] == "rental"
 
-@register()
 def is_car_list():
     return ui["current_page"] == "car_list"
 
-@register()
 def is_my_page():
     return ui["current_page"] == "my"
 
-@register()
 def is_settings():
     return ui["current_page"] == "settings"
 
-@register()
 def is_logged_out():
     return ui["current_page"] == "login"
 
-@register()
 def has_coupon():
     return ui["coupon_visible"]
 
@@ -60,45 +53,35 @@ def has_coupon():
 # ============================================================
 # Actions
 # ============================================================
-@register()
 def click_rental():
     ui["current_page"] = "rental"
-    # 30% 概率弹 coupon
     if random.random() < 0.3:
         ui["coupon_visible"] = True
 
-@register()
 def fill_and_search():
     ctx = get_context()
     print(f"  [action] 搜索: {ctx['pickup']} -> {ctx['dropoff']}")
-    # 20% 概率操作失败（模拟不确定性）
     if random.random() < 0.2:
         print("  [action] 搜索失败，页面未跳转")
         return
     ui["current_page"] = "car_list"
 
-@register()
 def go_back_to_rental():
     ui["current_page"] = "rental"
 
-@register()
 def go_back_to_home():
     ui["current_page"] = "home"
 
-@register()
 def click_my():
     ui["current_page"] = "my"
 
-@register()
 def click_settings():
     ui["current_page"] = "settings"
 
-@register()
 def do_logout():
     ui["current_page"] = "login"
     ui["logged_in"] = False
 
-@register()
 def login_new_account():
     ctx = get_context()
     account = ctx["accounts"].pop(0)
@@ -106,10 +89,32 @@ def login_new_account():
     ui["current_page"] = "home"
     ui["logged_in"] = True
 
-@register()
 def close_coupon():
     print("  [action] 关闭领券弹窗")
     ui["coupon_visible"] = False
+
+
+# ============================================================
+# Functions dict
+# ============================================================
+FUNCTIONS = {
+    "is_home": is_home,
+    "is_rental_page": is_rental_page,
+    "is_car_list": is_car_list,
+    "is_my_page": is_my_page,
+    "is_settings": is_settings,
+    "is_logged_out": is_logged_out,
+    "has_coupon": has_coupon,
+    "click_rental": click_rental,
+    "fill_and_search": fill_and_search,
+    "go_back_to_rental": go_back_to_rental,
+    "go_back_to_home": go_back_to_home,
+    "click_my": click_my,
+    "click_settings": click_settings,
+    "do_logout": do_logout,
+    "login_new_account": login_new_account,
+    "close_coupon": close_coupon,
+}
 
 
 # ============================================================
@@ -160,7 +165,7 @@ def main():
     ]
     accounts = ["account_2", "account_3"]
 
-    machine = StateMachine(GRAPH, context={
+    machine = StateMachine(GRAPH, functions=FUNCTIONS, context={
         "accounts": accounts,
     })
     machine.set_fallback(my_fallback)
@@ -175,13 +180,9 @@ def main():
         machine.context["pickup"] = pair["pickup"]
         machine.context["dropoff"] = pair["dropoff"]
 
-        # 导航到租车页
         machine.goto("rental")
-
-        # 导航到报价列表
         machine.goto("car_list")
 
-        # 模拟提取报价数据
         results.append({
             "pickup": pair["pickup"],
             "dropoff": pair["dropoff"],
@@ -189,7 +190,6 @@ def main():
         })
         print(f"  [结果] {results[-1]}")
 
-    # 走退出登录流程
     print(f"\n{'='*50}")
     print("退出登录")
     print(f"{'='*50}")

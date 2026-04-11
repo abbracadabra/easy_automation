@@ -4,16 +4,19 @@ import logging
 from typing import Any, Optional
 
 from easy_automation.core.graph import Graph, Interrupt
-from easy_automation.core.registry import get_function
 
 logger = logging.getLogger(__name__)
 
 
-def _match_best(candidates: list[tuple[Any, list[str]]]) -> Any:
+def _match_best(
+    candidates: list[tuple[Any, list[str]]],
+    functions: dict[str, callable],
+) -> Any:
     """通用匹配逻辑：对每个候选项执行其 matchers，全部通过才算命中，命中项中 matcher 数量最多的胜出。
 
     Args:
         candidates: [(item, matcher_names), ...]
+        functions: 函数名 -> callable 映射
 
     Returns:
         命中的 item，或 None
@@ -21,7 +24,7 @@ def _match_best(candidates: list[tuple[Any, list[str]]]) -> Any:
     matched = []
     for item, matcher_names in candidates:
         try:
-            matchers = [get_function(m) for m in matcher_names]
+            matchers = [functions[m] for m in matcher_names]
             if all(m() for m in matchers):
                 matched.append((item, len(matcher_names)))
         except Exception as e:
@@ -40,18 +43,18 @@ def _match_best(candidates: list[tuple[Any, list[str]]]) -> Any:
     return matched[0][0]
 
 
-def detect_state(graph: Graph) -> str:
+def detect_state(graph: Graph, functions: dict[str, callable]) -> str:
     candidates = [
         (name, state.matchers)
         for name, state in graph.states.items()
     ]
-    result = _match_best(candidates)
+    result = _match_best(candidates, functions)
     return result if result is not None else "unknown"
 
 
-def detect_interrupt(graph: Graph) -> Optional[Interrupt]:
+def detect_interrupt(graph: Graph, functions: dict[str, callable]) -> Optional[Interrupt]:
     candidates = [
         (interrupt, interrupt.matchers)
         for interrupt in graph.interrupts
     ]
-    return _match_best(candidates)
+    return _match_best(candidates, functions)

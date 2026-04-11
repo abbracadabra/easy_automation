@@ -4,21 +4,23 @@ from easy_automation.core.planner import goto
 
 
 class StateMachine:
-    def __init__(self, source, context: dict = None):
+    def __init__(self, source, functions: dict[str, callable], context: dict = None):
         """创建状态机实例。
 
         Args:
             source: JSON 文件路径(str) 或状态机图 dict
+            functions: 函数名 -> callable 映射，包含 graph 中引用的所有 matcher 和 action
             context: 初始上下文变量
         """
+        self.functions = functions
         self.context = context or {}
         set_context(self.context)
         self.graph = load_graph(source)
         self._fallback_fn = None
 
     def validate(self):
-        """校验图中引用的所有函数是否已注册。建议在所有 @register 完成后调用。"""
-        validate_graph_functions(self.graph)
+        """校验图中引用的所有函数名是否存在于 functions 中。"""
+        validate_graph_functions(self.graph, self.functions)
 
     def set_fallback(self, fn):
         """设置 fallback 函数，在卡死或死循环时调用。"""
@@ -45,6 +47,7 @@ class StateMachine:
         goto(
             target=target,
             graph=self.graph,
+            functions=self.functions,
             max_steps=max_steps,
             max_entry=max_entry,
             max_consecutive=max_consecutive,

@@ -7,7 +7,6 @@ from typing import Optional
 from easy_automation.core.cache import reset_snapshot_cache
 from easy_automation.core.detector import detect_interrupt, detect_state
 from easy_automation.core.graph import Graph
-from easy_automation.core.registry import get_function
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +58,7 @@ def find_next_action(
 def goto(
     target: str,
     graph: Graph,
+    functions: dict[str, callable],
     max_steps: int = 50,
     max_entry: int = 3,
     max_consecutive: int = 5,
@@ -91,13 +91,10 @@ def goto(
         last_state = None
 
     for step in range(max_steps):
-        # 0. 清空 iteration cache
         reset_snapshot_cache()
 
-        # 1. 检测当前状态
-        current = detect_state(graph)
+        current = detect_state(graph, functions)
 
-        # 2. 更新计数
         if current != last_state:
             entry_count[current] += 1
             consecutive_same = 1
@@ -107,39 +104,34 @@ def goto(
             consecutive_same += 1
             logger.debug(f"步骤 {step}: 仍在状态 {current} (连续第 {consecutive_same} 次)")
 
-        # 3. 卡死检测
         if consecutive_same >= max_consecutive:
             do_fallback(f"连续 {consecutive_same} 次停留在 {current}")
             continue
 
-        # 4. 检测 interrupt
-        interrupt = detect_interrupt(graph)
+        interrupt = detect_interrupt(graph, functions)
         if interrupt:
             logger.debug(f"步骤 {step}: 处理中断，执行 {interrupt.action}")
             try:
-                action_fn = get_function(interrupt.action)
+                action_fn = functions[interrupt.action]
                 action_fn()
             except Exception as e:
                 logger.warning(f"interrupt action {interrupt.action} 执行异常: {e}")
             continue
 
-        # 5. 到达目标？
         if current == target:
             logger.info(f"到达目标状态 {target}，共 {step + 1} 步")
             return
 
-        # 6. BFS 寻路，排除 entry_count > max_entry 的状态
         excluded = {s for s, c in entry_count.items() if c > max_entry}
         action_name = find_next_action(current, target, graph, excluded)
 
-        # 7. 有路走路，无路 fallback
         if action_name is None:
             do_fallback(f"从 {current} 到 {target} 无可用路径")
             continue
 
         logger.debug(f"步骤 {step}: 从 {current} 执行 {action_name}")
         try:
-            action_fn = get_function(action_name)
+            action_fn = functions[action_name]
             action_fn()
         except Exception as e:
             logger.warning(f"action {action_name} 执行异常: {e}")

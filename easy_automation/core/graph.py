@@ -1,8 +1,6 @@
 import json
 from dataclasses import dataclass, field
 
-from easy_automation.core.registry import get_function
-
 
 @dataclass
 class State:
@@ -84,32 +82,24 @@ def load_graph(source) -> Graph:
     return graph
 
 
-def validate_graph_functions(graph: Graph):
-    """校验图中引用的所有函数名是否已注册。应在所有函数注册完毕后调用。"""
+def validate_graph_functions(graph: Graph, functions: dict[str, callable]):
+    """校验图中引用的所有函数名是否存在于 functions dict 中。"""
     errors = []
     for name, state in graph.states.items():
         for m in state.matchers:
-            try:
-                get_function(m)
-            except KeyError:
-                errors.append(f"状态 {name} 的 matcher 函数未注册: {m}")
+            if m not in functions:
+                errors.append(f"状态 {name} 的 matcher 函数缺失: {m}")
 
     for t in graph.transitions:
-        try:
-            get_function(t.action)
-        except KeyError:
-            errors.append(f"transition {t.from_state} 的 action 函数未注册: {t.action}")
+        if t.action not in functions:
+            errors.append(f"transition {t.from_state} 的 action 函数缺失: {t.action}")
 
     for interrupt in graph.interrupts:
         for m in interrupt.matchers:
-            try:
-                get_function(m)
-            except KeyError:
-                errors.append(f"interrupt 的 matcher 函数未注册: {m}")
-        try:
-            get_function(interrupt.action)
-        except KeyError:
-            errors.append(f"interrupt 的 action 函数未注册: {interrupt.action}")
+            if m not in functions:
+                errors.append(f"interrupt 的 matcher 函数缺失: {m}")
+        if interrupt.action not in functions:
+            errors.append(f"interrupt 的 action 函数缺失: {interrupt.action}")
 
     if errors:
         raise ValueError("状态机图校验失败:\n" + "\n".join(f"  - {e}" for e in errors))
