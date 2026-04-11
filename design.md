@@ -1,563 +1,228 @@
-# Easy Automation - 非确定性状态机设计
+# Easy Automation 实现设计方案
 
-## 概述
+## 设计原则
 
-传统 UI 自动化使用线性脚本：步骤1 -> 步骤2 -> 步骤3。任何意外情况（弹窗、网络错误、加载延迟）都会导致整个流程崩溃。
+1. **平台无关** — 框架不感知任何 UI 驱动（Playwright/Appium/UIAutomator2），不定义 page/driver，用户自己管理
+2. **JSON 是结构，代码是行为** — 状态机图是纯数据，所有行为通过函数名引用到用户代码
+3. **统一匹配规则** — state 和 interrupt 使用同一套匹配逻辑：全部 matcher 通过才是候选，matcher 数量多的优先
+4. **反应式循环** — planner 每步执行后重新观测，不假设动作结果
+5. **隐式 context** — 通过 `contextvars` 提供全局可访问的 context，matcher/action 函数无参数
+6. **框架只做导航调度** — 不管设备操作层，不管页面内元素交互，只负责状态间的路径规划和容错
 
-本框架使用**非确定性状态机** + **反应式 Planner** 来解决这个问题。核心思路：
+## 核心思想
 
-- 将所有可能的 UI 状态和转移定义为一张图
-- Planner 读取这张图，观测当前状态，动态规划到目标状态的路径
-- 每个动作执行后，结果是不确定的 — Planner 重新观测、重新规划
+传统 UI 自动化用线性代码，每一步都要写大量 if-else 处理各种意外情况。本框架将这些分支逻辑收敛为：
 
-测试用例只表达**业务意图**（"到A页面，再到B页面"），不涉及实现细节（"点这个按钮，等3秒，填那个输入框"）。
+- 一张状态机图（定义所有可能的状态和转移关系）
+- 一个反应式 planner（自动寻路、观测、重新规划）
 
----
+用例只表达业务意图（"从 A 到 B"），不处理中间的意外和分支。
 
-## 状态机结构
+## 防死循环与容错机制
 
-状态机由四部分组成：
+这是框架最关键的容错设计，解决三类问题：
 
-```
-StateMachine = States + Transitions + Interrupts + Context
-```
+### 三类问题
 
-### 图定义（JSON）
-
-```json
-{
-  "states": { ... },
-  "transitions": [ ... ],
-  "interrupts": [ ... ]
-}
-```
-
----
-
-## 状态（States）
-
-一个状态代表一个可识别的 UI 场景（如"登录页"、"商品列表"、"订单确认页"）。
-
-每个状态有一个名称和一组 **matcher 函数名**。所有 matcher 都返回 `True`，该状态才算被匹配。
-
-```json
-{
-  "states": {
-    "login_page": {
-      "matchers": ["is_login_url", "has_login_form"]
-    },
-    "home_page": {
-      "matchers": ["is_home_url", "has_dashboard"]
-    },
-    "product_detail": {
-      "matchers": ["is_product_url", "has_product_info"]
-    },
-    "product_detail_with_cart": {
-      "matchers": ["is_product_url", "has_product_info", "has_cart_popup"]
-    }
-  }
-}
-```
-
-matcher 函数用 Python 实现：
-
-```python
-# matchers.py
-def is_login_url(page, context):
-    return "/login" in page.url
-
-def has_login_form(page, context):
-    return page.locator("#login-form").is_visible()
-
-def is_home_url(page, context):
-    return "/home" in page.url
-
-def has_dashboard(page, context):
-    return page.locator(".dashboard").is_visible()
-
-def is_product_url(page, context):
-    return "/product" in page.url
-
-def has_product_info(page, context):
-    return page.locator(".product-detail").is_visible()
-
-def has_cart_popup(page, context):
-    return page.locator(".cart-popup").is_visible()
-```
-
-### 状态匹配规则
-
-检测当前状态时：
-
-1. 对所有状态的 matcher 逐一求值
-2. 只有**全部** matcher 返回 `True` 的状态才是候选
-3. 候选中 **matcher 数量最多的胜出**
-
-```python
-def detect_state(page, context, states):
-    matched = []
-    for name, state in states.items():
-        matchers = [get_function(m) for m in state["matchers"]]
-        if all(m(page, context) for m in matchers):
-            matched.append((name, len(matchers)))
-
-    matched.sort(key=lambda x: -x[1])
-    return matched[0][0] if matched else "unknown"
-```
-
-**为什么"matcher 数量多的优先"：** 如果 `product_detail`（2个 matcher）和 `product_detail_with_cart`（3个 matcher）同时匹配，更具体的状态（有购物车弹窗的）自动胜出。不需要手动管理优先级或权重。
-
----
-
-## 转移（Transitions）
-
-一条转移定义：从某个状态，执行某个动作，可能到达的下一个状态。
-
-关键点在于转移是**非确定性的** — 执行一个动作后，可能到达多个不同的状态。
-
-```json
-{
-  "transitions": [
-    {
-      "from": "login_page",
-      "action": "do_login",
-      "possible_targets": ["home_page", "captcha_page", "login_page"]
-    },
-    {
-      "from": "home_page",
-      "action": "click_product",
-      "possible_targets": ["product_detail"]
-    },
-    {
-      "from": "product_detail",
-      "action": "click_buy",
-      "possible_targets": ["order_confirm", "login_page"]
-    }
-  ]
-}
-```
-
-动作函数用 Python 实现：
-
-```python
-# actions.py
-def do_login(page, context):
-    page.fill("#username", context["username"])
-    page.fill("#password", context["password"])
-    page.click("#login-btn")
-
-def click_product(page, context):
-    name = context["target_product"]
-    page.locator(f".product-item:has-text('{name}')").click()
-
-def click_buy(page, context):
-    page.click(".buy-btn")
-```
-
----
-
-## 中断（Interrupts）
-
-### 为什么需要中断
-
-在真实 App 中，弹窗几乎可以在任何页面出现：领券弹窗、升级提示、权限请求、广告浮层等。
-
-如果没有中断机制，你需要为每个页面定义带弹窗的状态：`pageA_with_coupon`、`pageB_with_coupon`、`pageC_with_coupon`... 以及对应的转移。假设有 10 个页面和 3 种弹窗，就可能多出 30 个状态和 30 条转移。
-
-中断机制通过定义**全局处理器**来解决这个问题，在正常状态匹配之前优先检查。
-
-### 定义
-
-```json
-{
-  "interrupts": [
-    {
-      "matchers": ["has_coupon_popup"],
-      "action": "close_coupon"
-    },
-    {
-      "matchers": ["has_upgrade_dialog"],
-      "action": "dismiss_upgrade"
-    },
-    {
-      "matchers": ["has_permission_popup"],
-      "action": "allow_permission"
-    },
-    {
-      "matchers": ["has_coupon_popup", "has_upgrade_dialog"],
-      "action": "close_all_popups"
-    }
-  ]
-}
-```
-
-### 中断匹配规则
-
-与状态匹配规则一致：所有 matcher 必须通过，**matcher 数量最多的优先**。
-
-这能处理多个弹窗同时出现的情况。例如，领券弹窗和升级提示同时弹出，`["has_coupon_popup", "has_upgrade_dialog"]`（2个 matcher）优先于单独的处理器（各1个 matcher）。
-
-```python
-def detect_interrupt(page, context, interrupts):
-    matched = []
-    for interrupt in interrupts:
-        matchers = [get_function(m) for m in interrupt["matchers"]]
-        if all(m(page, context) for m in matchers):
-            matched.append((interrupt, len(matchers)))
-
-    matched.sort(key=lambda x: -x[1])
-    return matched[0][0] if matched else None
-```
-
----
-
-## 上下文变量（Context）
-
-Context 是一个字典，贯穿整个执行过程。动作函数可以读取和写入。
-
-**变量有两个来源：**
-
-1. **外部传入** — 调用方在执行前提供
-2. **运行时产生** — 动作在执行过程中提取并写回
-
-```python
-# 外部传入
-machine.run(
-    target_state="product_detail",
-    context={
-        "target_product": "iPhone 16",
-        "username": "test_user",
-        "password": "123456",
-    }
-)
-```
-
-```python
-# 运行时产生 — 动作写入 context
-def extract_order_id(page, context):
-    context["order_id"] = page.locator(".order-id").text_content()
-```
-
-所有 matcher 和 action 函数的签名统一为 `(page, context)`，可以自由读写共享的 context。
-
----
-
-## Planner
-
-Planner 是运行时引擎。它读取状态机图，观测当前 UI 状态，通过反应式循环导航到目标状态。
-
-```python
-def goto(target_state, page, context, graph, max_steps=50):
-    for step in range(max_steps):
-        # 1. 优先检查中断
-        interrupt = detect_interrupt(page, context, graph["interrupts"])
-        if interrupt:
-            action = get_function(interrupt["action"])
-            action(page, context)
-            continue  # 处理完中断后重新观测
-
-        # 2. 检测当前状态
-        current = detect_state(page, context, graph["states"])
-
-        # 3. 到达目标？
-        if current == target_state:
-            return True
-
-        # 4. 在图上找从当前状态到目标状态的下一步动作
-        action = find_next_action(current, target_state, graph["transitions"])
-        action_fn = get_function(action)
-        action_fn(page, context)
-
-        # 5. 回到循环顶部重新观测（因为结果是不确定的）
-
-    raise TimeoutError(f"在 {max_steps} 步内未能到达 {target_state}")
-```
-
-`find_next_action` 函数在转移图上搜索从当前状态到目标状态的路径，返回下一步要执行的动作。执行后，Planner **不假设**到达了预期状态 — 它重新观测、重新规划。
-
----
-
-## 自动化用例 Demo
-
-### Demo 1：滴滴租车比价
-
-**场景：** 从滴滴 App 采集 1000+ 个取车-还车地点组合的租车报价。每 100 个组合后切换新账号。
-
-#### 状态机图
-
-```json
-{
-  "states": {
-    "didi_home": {
-      "matchers": ["is_didi_home"]
-    },
-    "rental_page": {
-      "matchers": ["is_rental_page"]
-    },
-    "car_list": {
-      "matchers": ["is_car_list"]
-    },
-    "my_page": {
-      "matchers": ["is_my_page"]
-    },
-    "settings_page": {
-      "matchers": ["is_settings_page"]
-    },
-    "logged_out": {
-      "matchers": ["is_login_page"]
-    }
-  },
-  "transitions": [
-    {
-      "from": "didi_home",
-      "action": "click_rental_entry",
-      "possible_targets": ["rental_page"]
-    },
-    {
-      "from": "rental_page",
-      "action": "fill_and_search",
-      "possible_targets": ["car_list"]
-    },
-    {
-      "from": "car_list",
-      "action": "go_back",
-      "possible_targets": ["rental_page"]
-    },
-    {
-      "from": "rental_page",
-      "action": "go_back",
-      "possible_targets": ["didi_home"]
-    },
-    {
-      "from": "didi_home",
-      "action": "click_my",
-      "possible_targets": ["my_page"]
-    },
-    {
-      "from": "my_page",
-      "action": "click_settings",
-      "possible_targets": ["settings_page"]
-    },
-    {
-      "from": "settings_page",
-      "action": "scroll_and_logout",
-      "possible_targets": ["logged_out"]
-    },
-    {
-      "from": "logged_out",
-      "action": "login_new_account",
-      "possible_targets": ["didi_home"]
-    }
-  ],
-  "interrupts": [
-    {
-      "matchers": ["has_coupon_popup"],
-      "action": "close_coupon"
-    }
-  ]
-}
-```
-
-说明：领券弹窗可能出现在任何页面（首页、租车页、我的页面）。一条 interrupt 定义即可全局处理，不需要 `didi_home_with_coupon`、`rental_page_with_coupon` 等额外状态。
-
-#### Matchers
-
-```python
-def is_didi_home(page, context):
-    return page.locator(".home-func-matrix").is_visible()
-
-def is_rental_page(page, context):
-    return page.locator(".rental-pickup-input").is_visible()
-
-def is_car_list(page, context):
-    return page.locator(".car-price-list").is_visible()
-
-def is_my_page(page, context):
-    return page.locator(".my-profile-header").is_visible()
-
-def is_settings_page(page, context):
-    return page.locator(".settings-list").is_visible()
-
-def is_login_page(page, context):
-    return page.locator(".login-form").is_visible()
-
-def has_coupon_popup(page, context):
-    return page.locator(".coupon-modal").is_visible()
-```
-
-#### Actions
-
-```python
-def click_rental_entry(page, context):
-    page.locator(".home-func-matrix").locator("text=滴滴租车").click()
-
-def close_coupon(page, context):
-    page.locator(".coupon-modal .close-btn").click()
-
-def fill_and_search(page, context):
-    page.locator(".rental-pickup-input").fill(context["pickup"])
-    page.locator(".rental-dropoff-input").fill(context["dropoff"])
-    page.locator(".rental-start-time").fill(context["start_time"])
-    page.locator(".rental-end-time").fill(context["end_time"])
-    page.locator(".btn-search-car").click()
-
-def go_back(page, context):
-    page.locator(".nav-back").click()
-
-def click_my(page, context):
-    page.locator("text=我的").click()
-
-def click_settings(page, context):
-    page.locator("text=设置").click()
-
-def scroll_and_logout(page, context):
-    page.locator(".settings-list").evaluate("el => el.scrollTo(0, el.scrollHeight)")
-    page.locator("text=退出登录").click()
-    page.locator("text=确认").click()
-
-def login_new_account(page, context):
-    account = context["accounts"].pop(0)
-    page.locator(".phone-input").fill(account["phone"])
-    page.locator(".verify-btn").click()
-    page.locator(".code-input").fill(account["code"])
-    page.locator(".login-btn").click()
-```
-
-#### 测试用例
-
-```python
-def test_didi_rental_price_comparison():
-    machine = StateMachine(graph, page)
-    pairs = load_pairs()        # 1000+ 取车-还车地点组合
-    accounts = load_accounts()  # 多个账号
-    results = []
-
-    machine.context["accounts"] = accounts
-
-    for i, pair in enumerate(pairs):
-        # 每 100 个组合切换账号
-        if i > 0 and i % 100 == 0:
-            machine.goto("logged_out")
-            machine.goto("didi_home")
-
-        # 导航到租车页并填写搜索条件
-        machine.goto("rental_page")
-        machine.context["pickup"] = pair["pickup"]
-        machine.context["dropoff"] = pair["dropoff"]
-        machine.context["start_time"] = pair["start"]
-        machine.context["end_time"] = pair["end"]
-
-        # 导航到报价列表
-        machine.goto("car_list")
-
-        # 提取报价数据（直接操作页面，不是状态切换）
-        page.locator(".sort-by-price").click()
-        items = page.locator(".car-item").all()[:100]
-        for item in items:
-            results.append({
-                "pickup": pair["pickup"],
-                "dropoff": pair["dropoff"],
-                "car": item.locator(".car-name").text_content(),
-                "price": item.locator(".car-price").text_content(),
-            })
-
-    save_results(results)
-```
-
-### Demo 2：京东商品价格查询
-
-**场景：** 在京东 App 搜索茅台，找到带"自营"标签、卖家为"京东超市白酒自营专区"的商品及价格。
-
-#### 状态机图
-
-```json
-{
-  "states": {
-    "jd_home": {
-      "matchers": ["is_jd_home"]
-    },
-    "search_input": {
-      "matchers": ["is_search_input_focused"]
-    },
-    "search_results": {
-      "matchers": ["is_search_results"]
-    }
-  },
-  "transitions": [
-    {
-      "from": "jd_home",
-      "action": "click_search_box",
-      "possible_targets": ["search_input"]
-    },
-    {
-      "from": "search_input",
-      "action": "type_and_search",
-      "possible_targets": ["search_results"]
-    }
-  ],
-  "interrupts": []
-}
-```
-
-#### Matchers & Actions
-
-```python
-def is_jd_home(page, context):
-    return page.locator(".jd-home-banner").is_visible()
-
-def is_search_input_focused(page, context):
-    return page.locator(".search-input:focus").is_visible()
-
-def is_search_results(page, context):
-    return page.locator(".product-list").is_visible()
-
-def click_search_box(page, context):
-    page.locator(".search-box").click()
-
-def type_and_search(page, context):
-    page.locator(".search-input").fill(context["keyword"])
-    page.locator(".search-btn").click()
-```
-
-#### 测试用例
-
-```python
-def test_jd_maotai_price():
-    machine = StateMachine(graph, page)
-    machine.context["keyword"] = "茅台"
-
-    # 导航到搜索结果页
-    machine.goto("search_results")
-
-    # 筛选并提取（直接操作页面）
-    items = page.locator(".product-item").all()
-    for item in items:
-        is_self_operated = item.locator(".tag-self").is_visible()
-        seller = item.locator(".seller-name").text_content()
-        if is_self_operated and "京东超市白酒自营专区" in seller:
-            print({
-                "name": item.locator(".product-name").text_content(),
-                "price": item.locator(".product-price").text_content(),
-            })
-            break
-```
-
----
-
-## 总结
-
-| 组件 | 存储形式 | 实现形式 |
+| 问题 | 表现 | 检测方式 |
 |---|---|---|
-| 状态（States） | JSON（名称 + matcher 函数名列表） | Python matcher 函数 |
-| 转移（Transitions） | JSON（from + action 名称 + possible_targets） | Python action 函数 |
-| 中断（Interrupts） | JSON（matcher 函数名列表 + action 名称） | Python matcher/action 函数 |
-| 上下文（Context） | 运行时字典 | 由 matcher 和 action 读写 |
-| 规划器（Planner） | 框架代码 | 反应式 观测-决策-执行 循环 |
+| 卡死 | 连续多次 iteration 停留在同一个 state（包括 unknown） | consecutive_same >= M |
+| 死循环 | 在多个 state 之间反复绕圈，无法到达目标 | 所有可选 next state 的 entry_count 都 > N |
+| 不可恢复 | fallback 多次后仍然无法到达目标 | fallback_count > X |
 
-**设计原则：**
+### 状态计数规则
 
-1. **JSON 是结构，代码是行为** — JSON 存储图的拓扑关系，Python 函数处理所有复杂逻辑
-2. **matcher 数量多的优先** — 状态和中断匹配使用同一规则：所有 matcher 必须通过，候选中 matcher 最多的胜出
-3. **中断处理全局弹窗** — 避免跨页面 UI 元素导致的状态爆炸
-4. **非确定性转移** — 每个动作可能导向多个状态，Planner 每步都重新观测
-5. **Context 传递变量** — 共享可变字典，支持外部传入和运行时提取
+**entry_count[state]：** 记录每个 state 的进入次数。只在状态切换时才 +1（从一个 state 变到另一个 state）。停留在同一个 state 不计入 entry，因为停留不代表路径上的循环。
+
+**consecutive_same：** 记录连续停留在同一个 state 的 iteration 次数。切换到新 state 后重置为 1。
+
+**fallback_count：** 整个 goto 期间的 fallback 累计次数，不重置。
+
+**作用域：** entry_count、consecutive_same、fallback_count 都只在一次 goto 调用内生效，下一次 goto 全部清零。
+
+### Planner 循环
+
+```
+goto(target):
+    entry_count = {}
+    consecutive_same = 0
+    last_state = None
+    fallback_count = 0
+
+    loop (max_steps):
+        1. 检测当前 state
+
+        2. 更新计数：
+           如果 current != last_state:
+               entry_count[current] += 1
+               consecutive_same = 1
+               last_state = current
+           否则:
+               consecutive_same += 1
+
+        3. 卡死检测：
+           如果 consecutive_same >= M → 触发 fallback
+
+        4. 检测 interrupt，有则处理，continue
+
+        5. 当前 == 目标？→ 结束
+
+        6. BFS 寻路（排除 entry_count > N 的 next state）
+
+        7. 有路 → 执行 action
+           无路（所有 next state 都超限）→ 触发 fallback
+
+    fallback 逻辑：
+        fallback_count += 1
+        如果 fallback_count > X → throw error
+        执行用户自定义 fallback 函数
+        重置 entry_count
+        重置 consecutive_same
+        重置 last_state
+        continue 回到循环顶部
+```
+
+### BFS 寻路（带排除）
+
+```python
+def find_next_action(current, target, graph, excluded_states):
+    """BFS 寻路，excluded_states 中的状态不作为 next state 考虑"""
+    adj = defaultdict(list)
+    for t in graph.transitions:
+        for pt in t.possible_targets:
+            adj[t.from_state].append((t.action, pt))
+
+    queue = deque([(current, None)])
+    visited = {current}
+    while queue:
+        state, first_action = queue.popleft()
+        for action, next_state in adj[state]:
+            if next_state in visited or next_state in excluded_states:
+                continue
+            fa = first_action or action
+            if next_state == target:
+                return fa
+            visited.add(next_state)
+            queue.append((next_state, fa))
+
+    return None  # 无路可走
+```
+
+## 模块划分
+
+```
+easy_automation/
+├── core/
+│   ├── context.py        # contextvars 管理
+│   ├── registry.py       # 函数注册表（matcher/action 函数名 -> 函数对象）
+│   ├── graph.py          # 状态机图的加载与数据结构
+│   ├── detector.py       # 状态检测 + 中断检测（统一匹配逻辑）
+│   ├── planner.py        # BFS 寻路 + 反应式循环 + 防死循环 + fallback
+│   └── engine.py         # StateMachine 入口类，组装以上模块
+├── tests/
+│   ├── test_context.py
+│   ├── test_registry.py
+│   ├── test_detector.py
+│   ├── test_planner.py   # 重点：死循环、卡死、fallback 场景的测试
+│   └── test_engine.py    # 端到端测试（用 mock 函数模拟 UI）
+└── examples/
+    └── mock_demo.py      # 用 mock 函数演示完整流程，不依赖任何 UI 驱动
+```
+
+## 关键实现点
+
+### 1. Context（contextvars）
+
+```python
+from contextvars import ContextVar
+
+_context_var: ContextVar[dict] = ContextVar('easy_automation_context')
+
+def get_context() -> dict:
+    return _context_var.get()
+
+def set_context(ctx: dict):
+    _context_var.set(ctx)
+```
+
+### 2. 函数注册表（装饰器）
+
+```python
+_registry: dict[str, callable] = {}
+
+def register(name: str = None):
+    def decorator(fn):
+        key = name or fn.__name__
+        _registry[key] = fn
+        return fn
+    return decorator
+
+def get_function(name: str) -> callable:
+    if name not in _registry:
+        raise KeyError(f"函数未注册: {name}")
+    return _registry[name]
+```
+
+### 3. 状态机图（数据结构 + 加载时校验）
+
+```python
+@dataclass
+class State:
+    name: str
+    matchers: list[str]
+
+@dataclass
+class Transition:
+    from_state: str
+    action: str
+    possible_targets: list[str]
+
+@dataclass
+class Interrupt:
+    matchers: list[str]
+    action: str
+
+@dataclass
+class Graph:
+    states: dict[str, State]
+    transitions: list[Transition]
+    interrupts: list[Interrupt]
+```
+
+加载时校验：函数名是否已注册、from_state 是否存在于 states、possible_targets 是否存在于 states。启动时报错而非运行时报错。
+
+### 4. 状态检测（统一匹配逻辑）
+
+state 和 interrupt 使用同一套匹配函数：全部 matcher 通过才是候选，候选中 matcher 数量最多的胜出。
+
+### 5. Engine（入口类）
+
+```python
+class StateMachine:
+    def __init__(self, graph_path: str, context: dict = None):
+        self.context = context or {}
+        set_context(self.context)
+        self.graph = load_graph(graph_path)
+
+    def goto(self, target: str, max_steps: int = 50,
+             max_entry: int = 3, max_consecutive: int = 5,
+             max_fallback: int = 3):
+        set_context(self.context)
+        goto(target, self.graph, max_steps,
+             max_entry, max_consecutive, max_fallback,
+             self.fallback_fn)
+
+    def set_fallback(self, fn):
+        self.fallback_fn = fn
+```
+
+## 设计决策记录
+
+| 决策 | 选择 | 原因 |
+|---|---|---|
+| matcher/action 函数签名 | 无参数，通过 contextvars 获取 context | 简洁，避免每个函数都传参 |
+| 状态/中断匹配优先级 | matcher 数量多的优先 | 自动化，不需要手动维护 weight |
+| 同一个 from→to 只允许一个 action | 是 | 保持简单，多 action 增加复杂度但收益不大 |
+| detect_state 返回 unknown 时 | 纳入 consecutive_same 计数，由卡死检测处理 | 不单独处理，统一机制 |
+| 页面内等待策略 | 框架不管，用户在 matcher/action 里自己处理 | 平台无关原则 |
+| fallback 时是否重置 entry_count | 重置 | 给 planner 全新机会，fallback_count 兜底防无限重启 |
