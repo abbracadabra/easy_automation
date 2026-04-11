@@ -5,7 +5,7 @@ from collections import defaultdict, deque
 from typing import Optional
 
 from easy_automation.core.cache import reset_snapshot_cache
-from easy_automation.core.detector import detect_interrupt, detect_state
+from easy_automation.core.detector import detect_state
 from easy_automation.core.graph import Graph
 
 logger = logging.getLogger(__name__)
@@ -106,16 +106,6 @@ def goto(
 
         if consecutive_same >= max_consecutive:
             do_fallback(f"连续 {consecutive_same} 次停留在 {current}")
-            continue
-
-        interrupt = detect_interrupt(graph, functions)
-        if interrupt:
-            logger.debug(f"步骤 {step}: 处理中断，执行 {interrupt.action}")
-            try:
-                action_fn = functions[interrupt.action]
-                action_fn()
-            except Exception as e:
-                logger.warning(f"interrupt action {interrupt.action} 执行异常: {e}")
             continue
 
         if current == target:

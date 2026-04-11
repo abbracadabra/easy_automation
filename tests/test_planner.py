@@ -1,6 +1,6 @@
 import pytest
 from easy_automation.core.context import set_context
-from easy_automation.core.graph import Graph, State, Transition, Interrupt
+from easy_automation.core.graph import Graph, State, Transition
 from easy_automation.core.planner import find_next_action, goto, GotoFailed, FallbackExhausted
 
 
@@ -21,7 +21,6 @@ class TestFindNextAction:
                 Transition("a", "go_b", ["b"]),
                 Transition("b", "go_c", ["c"]),
             ],
-            interrupts=[],
         )
 
     def test_direct_target(self):
@@ -61,7 +60,6 @@ class TestFindNextAction:
                 Transition("b", "go_d_via_b", ["d"]),
                 Transition("c", "go_d_via_c", ["d"]),
             ],
-            interrupts=[],
         )
         action = find_next_action("a", "d", graph)
         assert action in ("go_b", "go_c")
@@ -81,7 +79,6 @@ class TestFindNextAction:
                 Transition("b", "go_d_via_b", ["d"]),
                 Transition("c", "go_d_via_c", ["d"]),
             ],
-            interrupts=[],
         )
         assert find_next_action("a", "d", graph, excluded_states={"b"}) == "go_c"
 
@@ -96,7 +93,6 @@ class TestFindNextAction:
             transitions=[
                 Transition("a", "do_something", ["b", "c"]),
             ],
-            interrupts=[],
         )
         assert find_next_action("a", "b", graph) == "do_something"
         assert find_next_action("a", "c", graph) == "do_something"
@@ -116,7 +112,6 @@ class TestGoto:
         graph = Graph(
             states={"a": State("a", ["m_a"])},
             transitions=[],
-            interrupts=[],
         )
         set_context({})
         goto("a", graph, functions)
@@ -143,7 +138,6 @@ class TestGoto:
             transitions=[
                 Transition("a", "go_b", ["b"]),
             ],
-            interrupts=[],
         )
         set_context({})
         goto("b", graph, functions)
@@ -178,23 +172,22 @@ class TestGoto:
                 Transition("a", "go_b", ["b"]),
                 Transition("b", "go_c", ["c"]),
             ],
-            interrupts=[],
         )
         set_context({})
         goto("c", graph, functions)
 
-    def test_interrupt_handling(self):
-        """中断弹窗自动处理后继续导航"""
+    def test_priority_state_handling(self):
+        """优先级状态（如弹窗）放在 states 最前面，自动处理后继续导航"""
         state_holder = {"current": "a", "popup": True}
+
+        def has_popup():
+            return state_holder["popup"]
 
         def m_a():
             return state_holder["current"] == "a"
 
         def m_b():
             return state_holder["current"] == "b"
-
-        def has_popup():
-            return state_holder["popup"]
 
         def close_popup():
             state_holder["popup"] = False
@@ -203,20 +196,19 @@ class TestGoto:
             state_holder["current"] = "b"
 
         functions = {
-            "m_a": m_a, "m_b": m_b,
             "has_popup": has_popup, "close_popup": close_popup,
+            "m_a": m_a, "m_b": m_b,
             "go_b": go_b,
         }
         graph = Graph(
             states={
+                "popup": State("popup", ["has_popup"]),
                 "a": State("a", ["m_a"]),
                 "b": State("b", ["m_b"]),
             },
             transitions=[
+                Transition("popup", "close_popup", ["a", "b"]),
                 Transition("a", "go_b", ["b"]),
-            ],
-            interrupts=[
-                Interrupt(matchers=["has_popup"], action="close_popup"),
             ],
         )
         set_context({})
@@ -248,7 +240,6 @@ class TestGoto:
             transitions=[
                 Transition("a", "go_b", ["b", "a"]),
             ],
-            interrupts=[],
         )
         set_context({})
         goto("b", graph, functions)
@@ -280,7 +271,6 @@ class TestGoto:
             transitions=[
                 Transition("a", "go_b", ["b"]),
             ],
-            interrupts=[],
         )
         set_context({})
         goto("b", graph, functions, max_consecutive=3, fallback_fn=my_fallback)
@@ -320,7 +310,6 @@ class TestGoto:
                 Transition("a", "go_b", ["b"]),
                 Transition("b", "go_a", ["a"]),
             ],
-            interrupts=[],
         )
         set_context({})
         goto("c", graph2, functions, max_entry=2, fallback_fn=my_fallback)
@@ -348,7 +337,6 @@ class TestGoto:
             transitions=[
                 Transition("a", "go_b", ["b"]),
             ],
-            interrupts=[],
         )
         set_context({})
         with pytest.raises(FallbackExhausted):
@@ -374,7 +362,6 @@ class TestGoto:
             transitions=[
                 Transition("a", "go_b", ["b"]),
             ],
-            interrupts=[],
         )
         set_context({})
         with pytest.raises(GotoFailed, match="未设置 fallback"):
@@ -406,7 +393,6 @@ class TestGoto:
             transitions=[
                 Transition("a", "go_b_with_context", ["b"]),
             ],
-            interrupts=[],
         )
         ctx = {}
         set_context(ctx)

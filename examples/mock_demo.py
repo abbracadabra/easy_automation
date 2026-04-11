@@ -3,7 +3,7 @@ Mock Demo: 模拟滴滴租车比价流程
 
 不依赖任何 UI 驱动，用内存状态模拟页面切换，演示框架完整能力：
 - 多状态导航
-- interrupt 自动处理弹窗
+- 优先级状态自动处理弹窗（如 coupon 弹窗放在 states 最前面）
 - context 传递业务数据
 - 非确定性转移（action 可能失败）
 - fallback 机制
@@ -122,6 +122,7 @@ FUNCTIONS = {
 # ============================================================
 GRAPH = {
     "states": {
+        "has_coupon": {"matchers": ["has_coupon"]},
         "home": {"matchers": ["is_home"]},
         "rental": {"matchers": ["is_rental_page"]},
         "car_list": {"matchers": ["is_car_list"]},
@@ -130,6 +131,7 @@ GRAPH = {
         "logged_out": {"matchers": ["is_logged_out"]},
     },
     "transitions": [
+        {"from": "has_coupon", "action": "close_coupon", "possible_targets": ["home", "rental", "car_list", "my", "settings"]},
         {"from": "home", "action": "click_rental", "possible_targets": ["rental"]},
         {"from": "rental", "action": "fill_and_search", "possible_targets": ["car_list", "rental"]},
         {"from": "car_list", "action": "go_back_to_rental", "possible_targets": ["rental"]},
@@ -138,9 +140,6 @@ GRAPH = {
         {"from": "my", "action": "click_settings", "possible_targets": ["settings"]},
         {"from": "settings", "action": "do_logout", "possible_targets": ["logged_out"]},
         {"from": "logged_out", "action": "login_new_account", "possible_targets": ["home"]},
-    ],
-    "interrupts": [
-        {"matchers": ["has_coupon"], "action": "close_coupon"},
     ],
 }
 

@@ -16,16 +16,9 @@ class Transition:
 
 
 @dataclass
-class Interrupt:
-    matchers: list[str]
-    action: str
-
-
-@dataclass
 class Graph:
     states: dict[str, State] = field(default_factory=dict)
     transitions: list[Transition] = field(default_factory=list)
-    interrupts: list[Interrupt] = field(default_factory=list)
 
 
 def load_graph(source) -> Graph:
@@ -66,19 +59,7 @@ def load_graph(source) -> Graph:
             possible_targets=possible_targets,
         ))
 
-    interrupts = []
-    for i, i_data in enumerate(data.get("interrupts", [])):
-        if "matchers" not in i_data or "action" not in i_data:
-            raise ValueError(f"第 {i} 条 interrupt 缺少 matchers 或 action 字段")
-        matchers = i_data["matchers"]
-        if not matchers:
-            raise ValueError("interrupt 的 matchers 不能为空")
-        interrupts.append(Interrupt(
-            matchers=matchers,
-            action=i_data["action"],
-        ))
-
-    graph = Graph(states=states, transitions=transitions, interrupts=interrupts)
+    graph = Graph(states=states, transitions=transitions)
     return graph
 
 
@@ -93,13 +74,6 @@ def validate_graph_functions(graph: Graph, functions: dict[str, callable]):
     for t in graph.transitions:
         if t.action not in functions:
             errors.append(f"transition {t.from_state} 的 action 函数缺失: {t.action}")
-
-    for interrupt in graph.interrupts:
-        for m in interrupt.matchers:
-            if m not in functions:
-                errors.append(f"interrupt 的 matcher 函数缺失: {m}")
-        if interrupt.action not in functions:
-            errors.append(f"interrupt 的 action 函数缺失: {interrupt.action}")
 
     if errors:
         raise ValueError("状态机图校验失败:\n" + "\n".join(f"  - {e}" for e in errors))

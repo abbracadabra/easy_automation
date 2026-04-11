@@ -48,7 +48,6 @@ def test_cache_cleared_each_iteration():
         transitions=[
             Transition("a", "go_b", ["b"]),
         ],
-        interrupts=[],
     )
     set_context({})
     goto("b", graph, functions)
@@ -86,7 +85,6 @@ def test_cache_not_leak_across_iterations():
         transitions=[
             Transition("a", "go_b", ["b", "a"]),
         ],
-        interrupts=[],
     )
     set_context({})
     goto("b", graph, functions)
@@ -124,7 +122,6 @@ def test_shared_matcher_cached_once():
             "page_a_popup": State("page_a_popup", ["match_common_element", "is_page_a_with_popup"]),
         },
         transitions=[],
-        interrupts=[],
     )
     set_context({})
     reset_snapshot_cache()

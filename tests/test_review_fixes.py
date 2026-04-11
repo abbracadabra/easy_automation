@@ -1,7 +1,7 @@
 """针对 code review 发现的问题的验证测试"""
 import pytest
 from easy_automation.core.context import get_context, set_context
-from easy_automation.core.graph import Graph, State, Transition, Interrupt, load_graph
+from easy_automation.core.graph import Graph, State, Transition, load_graph
 from easy_automation.core.detector import detect_state
 from easy_automation.core.planner import goto
 from easy_automation.core.engine import StateMachine
@@ -22,7 +22,6 @@ def test_matcher_exception_treated_as_no_match():
             "good_state": State("good_state", ["good_matcher"]),
         },
         transitions=[],
-        interrupts=[],
     )
     assert detect_state(graph, functions) == "good_state"
 
@@ -42,7 +41,6 @@ def test_all_matchers_exception_returns_unknown():
             "b": State("b", ["bad2"]),
         },
         transitions=[],
-        interrupts=[],
     )
     assert detect_state(graph, functions) == "unknown"
 
@@ -73,25 +71,24 @@ def test_action_exception_does_not_crash_goto():
         transitions=[
             Transition("a", "flaky_action", ["b", "a"]),
         ],
-        interrupts=[],
     )
     set_context({})
     goto("b", graph, functions)
     assert call_count["action"] == 3
 
 
-def test_interrupt_action_exception_does_not_crash():
-    """interrupt action 抛异常时不应崩溃"""
+def test_priority_state_action_exception_does_not_crash():
+    """优先级状态的 action 抛异常时不应崩溃，planner 继续循环"""
     state_holder = {"current": "a", "popup": True, "attempt": 0}
+
+    def has_popup():
+        return state_holder["popup"]
 
     def m_a():
         return state_holder["current"] == "a"
 
     def m_b():
         return state_holder["current"] == "b"
-
-    def has_popup():
-        return state_holder["popup"]
 
     def close_popup():
         state_holder["attempt"] += 1
@@ -103,20 +100,20 @@ def test_interrupt_action_exception_does_not_crash():
         state_holder["current"] = "b"
 
     functions = {
+        "has_popup": has_popup,
         "m_a": m_a, "m_b": m_b,
-        "has_popup": has_popup, "close_popup": close_popup,
+        "close_popup": close_popup,
         "go_b": go_b,
     }
     graph = Graph(
         states={
+            "popup": State("popup", ["has_popup"]),
             "a": State("a", ["m_a"]),
             "b": State("b", ["m_b"]),
         },
         transitions=[
+            Transition("popup", "close_popup", ["a", "b"]),
             Transition("a", "go_b", ["b"]),
-        ],
-        interrupts=[
-            Interrupt(["has_popup"], "close_popup"),
         ],
     )
     set_context({})
@@ -139,7 +136,6 @@ def test_engine_init_sets_context():
     graph_data = {
         "states": {"a": {"matchers": ["m"]}},
         "transitions": [],
-        "interrupts": [],
     }
     machine = StateMachine(graph_data, functions=functions, context={"key": "value"})
     assert get_context()["key"] == "value"
@@ -148,20 +144,12 @@ def test_engine_init_sets_context():
 def test_load_graph_missing_fields():
     """JSON 缺少必要字段时应给出明确错误"""
     with pytest.raises(ValueError, match="缺少 matchers"):
-        load_graph({"states": {"a": {}}, "transitions": [], "interrupts": []})
+        load_graph({"states": {"a": {}}, "transitions": []})
 
     with pytest.raises(ValueError, match="缺少 from"):
         load_graph({
             "states": {"a": {"matchers": ["m"]}},
             "transitions": [{"action": "go", "possible_targets": ["a"]}],
-            "interrupts": [],
-        })
-
-    with pytest.raises(ValueError, match="缺少.*action"):
-        load_graph({
-            "states": {"a": {"matchers": ["m"]}},
-            "transitions": [],
-            "interrupts": [{"matchers": ["m"]}],
         })
 
 
@@ -174,7 +162,6 @@ def test_planner_goto_validates_target():
     graph = Graph(
         states={"a": State("a", ["m"])},
         transitions=[],
-        interrupts=[],
     )
     set_context({})
     with pytest.raises(ValueError, match="目标状态不存在"):

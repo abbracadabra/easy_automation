@@ -4,7 +4,7 @@
 
 1. **平台无关** — 框架不感知任何 UI 驱动（Playwright/Appium/UIAutomator2），不定义 page/driver，用户自己管理
 2. **JSON 是结构，代码是行为** — 状态机图是纯数据，所有行为通过函数名引用到用户代码
-3. **统一匹配规则** — state 和 interrupt 使用同一套匹配逻辑：全部 matcher 通过才是候选，matcher 数量多的优先
+3. **有序匹配规则** — state 按定义顺序匹配：全部 matcher 通过即命中，先匹配先返回
 4. **反应式循环** — planner 每步执行后重新观测，不假设动作结果
 5. **隐式 context** — 通过 `contextvars` 提供全局可访问的 context，matcher/action 函数无参数
 6. **框架只做导航调度** — 不管设备操作层，不管页面内元素交互，只负责状态间的路径规划和容错
@@ -63,13 +63,11 @@ goto(target):
         3. 卡死检测：
            如果 consecutive_same >= M → 触发 fallback
 
-        4. 检测 interrupt，有则处理，continue
+        4. 当前 == 目标？→ 结束
 
-        5. 当前 == 目标？→ 结束
+        5. BFS 寻路（排除 entry_count > N 的 next state）
 
-        6. BFS 寻路（排除 entry_count > N 的 next state）
-
-        7. 有路 → 执行 action
+        6. 有路 → 执行 action
            无路（所有 next state 都超限）→ 触发 fallback
 
     fallback 逻辑：
@@ -116,7 +114,7 @@ easy_automation/
 │   ├── context.py        # contextvars 管理
 │   ├── registry.py       # 函数注册表（matcher/action 函数名 -> 函数对象）
 │   ├── graph.py          # 状态机图的加载与数据结构
-│   ├── detector.py       # 状态检测 + 中断检测（统一匹配逻辑）
+│   ├── detector.py       # 状态检测（按定义顺序，先匹配先返回）
 │   ├── planner.py        # BFS 寻路 + 反应式循环 + 防死循环 + fallback
 │   └── engine.py         # StateMachine 入口类，组装以上模块
 ├── tests/
@@ -178,22 +176,16 @@ class Transition:
     possible_targets: list[str]
 
 @dataclass
-class Interrupt:
-    matchers: list[str]
-    action: str
-
-@dataclass
 class Graph:
     states: dict[str, State]
     transitions: list[Transition]
-    interrupts: list[Interrupt]
 ```
 
-加载时校验：函数名是否已注册、from_state 是否存在于 states、possible_targets 是否存在于 states。启动时报错而非运行时报错。
+加载时校验：函数名是否已注册、from_state 是否存在于 states、possible_targets 是否存在于 states。启动时报错而非运行时报错。需要高优先级处理的状态（如弹窗关闭）作为普通 state 放在 states 最前面，通过 transitions 的 possible_targets 连接到所有可能的后续状态。
 
-### 4. 状态检测（统一匹配逻辑）
+### 4. 状态检测（有序匹配）
 
-state 和 interrupt 使用同一套匹配函数：全部 matcher 通过才是候选，候选中 matcher 数量最多的胜出。
+按 states 定义顺序依次检测，第一个所有 matcher 都通过的 state 胜出。需要高优先级处理的状态（如弹窗）放在 states 最前面。
 
 ### 5. Engine（入口类）
 
@@ -221,7 +213,7 @@ class StateMachine:
 | 决策 | 选择 | 原因 |
 |---|---|---|
 | matcher/action 函数签名 | 无参数，通过 contextvars 获取 context | 简洁，避免每个函数都传参 |
-| 状态/中断匹配优先级 | matcher 数量多的优先 | 自动化，不需要手动维护 weight |
+| 状态匹配优先级 | 按定义顺序，先匹配先返回 | 简单直观，用户通过排列顺序控制优先级 |
 | 同一个 from→to 只允许一个 action | 是 | 保持简单，多 action 增加复杂度但收益不大 |
 | detect_state 返回 unknown 时 | 纳入 consecutive_same 计数，由卡死检测处理 | 不单独处理，统一机制 |
 | 页面内等待策略 | 框架不管，用户在 matcher/action 里自己处理 | 平台无关原则 |

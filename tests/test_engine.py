@@ -7,7 +7,7 @@ def test_end_to_end_didi_like_flow():
     """端到端测试：模拟滴滴租车比价的简化流程
 
     流程：home -> rental_page -> car_list -> rental_page -> home -> my_page -> settings -> logged_out
-    中间可能出现 coupon 弹窗（interrupt 处理）
+    中间可能出现 coupon 弹窗（优先级状态处理）
     """
     state_holder = {"current": "home", "coupon_visible": False, "coupon_closed_count": 0}
 
@@ -80,6 +80,7 @@ def test_end_to_end_didi_like_flow():
 
     graph_data = {
         "states": {
+            "has_coupon": {"matchers": ["has_coupon"]},
             "home": {"matchers": ["is_home"]},
             "rental": {"matchers": ["is_rental_page"]},
             "car_list": {"matchers": ["is_car_list"]},
@@ -88,6 +89,8 @@ def test_end_to_end_didi_like_flow():
             "logged_out": {"matchers": ["is_logged_out"]},
         },
         "transitions": [
+            {"from": "has_coupon", "action": "close_coupon",
+             "possible_targets": ["home", "rental", "car_list", "my", "settings", "logged_out"]},
             {"from": "home", "action": "click_rental", "possible_targets": ["rental"]},
             {"from": "rental", "action": "fill_and_search", "possible_targets": ["car_list"]},
             {"from": "car_list", "action": "go_back_to_rental", "possible_targets": ["rental"]},
@@ -95,9 +98,6 @@ def test_end_to_end_didi_like_flow():
             {"from": "home", "action": "click_my", "possible_targets": ["my"]},
             {"from": "my", "action": "click_settings", "possible_targets": ["settings"]},
             {"from": "settings", "action": "do_logout", "possible_targets": ["logged_out"]},
-        ],
-        "interrupts": [
-            {"matchers": ["has_coupon"], "action": "close_coupon"},
         ],
     }
 
@@ -127,7 +127,6 @@ def test_target_state_not_exist():
     graph_data = {
         "states": {"a": {"matchers": ["m"]}},
         "transitions": [],
-        "interrupts": [],
     }
     machine = StateMachine(graph_data, functions=functions)
     with pytest.raises(ValueError, match="目标状态不存在"):
