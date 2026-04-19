@@ -10,7 +10,7 @@
   main_page      → 链家主页（MainActivity，底部 tab）
   ershoufang     → 二手房首页（SHHomePageActivity，通用列表）
   search_input   → 搜索输入（SearchHouseSuggestActivity）
-  community_list → 小区房源列表（SecondHandHouseListActivity，搜索后）
+  ershoufang_list → 小区房源列表（SecondHandHouseListActivity，搜索后）
 """
 import logging
 import subprocess
@@ -66,7 +66,7 @@ def is_main_page():
 def is_search_input():
     return "SearchHouseSuggest" in d().current_activity
 
-def is_community_list():
+def is_ershoufang_list():
     """小区房源列表 — 搜索小区后进入"""
     return "SecondHandHouseList" in d().current_activity
 
@@ -155,16 +155,16 @@ GRAPH = {
         "login":          {"matchers": ["is_login"]},
         "main_page":      {"matchers": ["is_main_page"]}, # 链家主页
         "search_input":   {"matchers": ["is_search_input"]}, # 搜索输入
-        "community_list": {"matchers": ["is_community_list"]}, # 小区房源列表
-        "ershoufang":     {"matchers": ["is_ershoufang"]}, # 二手房首页
+        "ershoufang_list": {"matchers": ["is_ershoufang_list"]}, # 小区房源列表
+        "ershoufang_main_page":     {"matchers": ["is_ershoufang"]}, # 二手房首页
     },
     "transitions": [
-        {"from": "main_page",      "action": "click_ershoufang_entry",     "possible_targets": ["ershoufang"]},
-        {"from": "ershoufang",     "action": "click_search_bar_home",      "possible_targets": ["search_input"]},
-        {"from": "community_list", "action": "click_search_bar_community", "possible_targets": ["search_input"]},
-        {"from": "search_input",   "action": "search_and_select_community", "possible_targets": ["community_list"]},
-        {"from": "search_input",   "action": "click_cancel_search",        "possible_targets": ["ershoufang", "community_list"]},
-        {"from": "community_list", "action": "press_back",                 "possible_targets": ["ershoufang", "search_input"]},
+        {"from": "main_page",      "action": "click_ershoufang_entry",     "possible_targets": ["ershoufang_main_page"]},
+        {"from": "ershoufang_main_page",     "action": "click_search_bar_home",      "possible_targets": ["search_input"]},
+        {"from": "ershoufang_list", "action": "click_search_bar_community", "possible_targets": ["search_input"]},
+        {"from": "search_input",   "action": "search_and_select_community", "possible_targets": ["ershoufang_list"]},
+        {"from": "search_input",   "action": "click_cancel_search",        "possible_targets": ["ershoufang_main_page", "ershoufang_list"]},
+        {"from": "ershoufang_list", "action": "press_back",                 "possible_targets": ["ershoufang_main_page", "search_input"]},
     ],
 }
 
@@ -172,7 +172,7 @@ FUNCTIONS = {
     "is_login":                     is_login,
     "is_main_page":                 is_main_page,
     "is_search_input":              is_search_input,
-    "is_community_list":            is_community_list,
+    "is_ershoufang_list":           is_ershoufang_list,
     "is_ershoufang":                is_ershoufang,
     "click_ershoufang_entry":       click_ershoufang_entry,
     "click_search_bar_home":        click_search_bar_home,
@@ -246,7 +246,7 @@ def main():
         # 设置目标小区，先到搜索页再搜索进入小区列表
         sm.context["xiaoqu"] = xiaoqu
         sm.goto("search_input")
-        sm.goto("community_list")
+        sm.goto("ershoufang_list")
 
         # 排序: 总价从低到高
         sort_by_price_low_to_high()
@@ -260,8 +260,8 @@ def main():
     print("\n" + "=" * 60)
     print("最终结果")
     print("=" * 60)
-    for community, prices in all_results.items():
-        print(f"\n{community} — 最便宜的 {len(prices)} 套:")
+    for xiaoqu, prices in all_results.items():
+        print(f"\n{xiaoqu} — 最便宜的 {len(prices)} 套:")
         for i, item in enumerate(prices, 1):
             print(f"  {i}. {item['total']:>8s}  {item['unit']:>12s}  {item['info']}")
 
