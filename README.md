@@ -46,4 +46,5 @@ for xiaoqu in xiaoqu_list:
     all_results[xiaoqu] = prices
     logger.info(f"{xiaoqu}: 获取到 {len(prices)} 条")
 ```
-![xx](./resources/screenshot.jpg)
+![](./resources/screenshot.jpg)
+![](./resources/recording.gif)
