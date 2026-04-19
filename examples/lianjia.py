@@ -11,6 +11,8 @@
   ershoufang     → 二手房首页（SHHomePageActivity，通用列表）
   search_input   → 搜索输入（SearchHouseSuggestActivity）
   ershoufang_list → 小区房源列表（SecondHandHouseListActivity，搜索后）
+
+执行: python3 -m examples.lianjia
 """
 import logging
 import subprocess
