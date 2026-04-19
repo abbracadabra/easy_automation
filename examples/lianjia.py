@@ -21,7 +21,7 @@ from appium.options.android import UiAutomator2Options
 from appium.webdriver.common.appiumby import AppiumBy
 from selenium.common.exceptions import WebDriverException
 
-from easy_automation import StateMachine
+from easy_automation import StateMachine, get_context
 
 logging.basicConfig(level=logging.INFO, format="%(name)s - %(message)s")
 logger = logging.getLogger("lianjia")
@@ -52,6 +52,18 @@ def d():
     if driver is None:
         create_driver()
     return driver
+
+
+def reconnect_driver():
+    """UiAutomator2 server 崩溃时重建 session"""
+    global driver
+    if driver:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+        driver = None
+    return create_driver()
 
 
 # ============================================================
@@ -91,6 +103,23 @@ def click_search_bar_community():
     """小区列表 → 搜索: 点击搜索栏"""
     d().find_element(AppiumBy.ID, "com.homelink.android:id/rl_search").click()
     time.sleep(1)
+
+def search_and_select_community():
+    """搜索 → 小区列表: 从 context 读小区名，输入并点击建议项"""
+    name = get_context()["community"]
+    inp = d().find_element(AppiumBy.ID, "com.homelink.android:id/et_search")
+    inp.clear()
+    time.sleep(0.5)
+    inp.send_keys(name)
+    time.sleep(2)
+
+    suggestions = d().find_elements(AppiumBy.XPATH,
+        f'//*[contains(@text, "{name}") '
+        f'and not(@resource-id="com.homelink.android:id/et_search")]')
+    if not suggestions:
+        raise RuntimeError(f"搜索建议中未找到: {name}")
+    suggestions[0].click()
+    time.sleep(3)
 
 def click_cancel_search():
     """搜索 → 返回上一页"""
@@ -145,6 +174,7 @@ GRAPH = {
         {"from": "main_page",      "action": "click_ershoufang_entry",     "possible_targets": ["ershoufang"]},
         {"from": "ershoufang",     "action": "click_search_bar_home",      "possible_targets": ["search_input"]},
         {"from": "community_list", "action": "click_search_bar_community", "possible_targets": ["search_input"]},
+        {"from": "search_input",   "action": "search_and_select_community", "possible_targets": ["community_list"]},
         {"from": "search_input",   "action": "click_cancel_search",        "possible_targets": ["ershoufang", "community_list"]},
         {"from": "community_list", "action": "press_back",                 "possible_targets": ["ershoufang", "search_input"]},
     ],
@@ -159,6 +189,7 @@ FUNCTIONS = {
     "click_ershoufang_entry":       click_ershoufang_entry,
     "click_search_bar_home":        click_search_bar_home,
     "click_search_bar_community":   click_search_bar_community,
+    "search_and_select_community":  search_and_select_community,
     "click_cancel_search":          click_cancel_search,
     "press_back":                   press_back,
 }
@@ -167,27 +198,13 @@ FUNCTIONS = {
 # ============================================================
 # 业务逻辑 — goto 之间直接操作 Appium
 # ============================================================
-def search_community(name: str):
-    """搜索页: 输入小区名 → 点击建议项 → 进入小区房源列表"""
-    inp = d().find_element(AppiumBy.ID, "com.homelink.android:id/et_search")
-    inp.clear()
-    time.sleep(0.5)
-    inp.send_keys(name)
-    time.sleep(2)
-
-    # 建议项: 排除输入框自身，取第一个匹配的元素
-    suggestions = d().find_elements(AppiumBy.XPATH,
-        f'//*[contains(@text, "{name}") '
-        f'and not(@resource-id="com.homelink.android:id/et_search")]')
-    if not suggestions:
-        raise RuntimeError(f"搜索建议中未找到: {name}")
-    suggestions[0].click()
-    time.sleep(2)
-
-
 def sort_by_price_low_to_high():
     """点排序 → 总价从低到高"""
-    d().find_element(AppiumBy.XPATH, '//*[@text="排序"]').click()
+    try:
+        d().find_element(AppiumBy.XPATH, '//*[@text="排序"]').click()
+    except WebDriverException:
+        reconnect_driver()
+        d().find_element(AppiumBy.XPATH, '//*[@text="排序"]').click()
     time.sleep(1)
     d().find_element(AppiumBy.XPATH, '//*[contains(@text, "总价从低到高")]').click()
     time.sleep(2)
@@ -199,8 +216,11 @@ def scrape_top_prices(n: int = 10):
     seen_titles = set()  # 用标题去重（同价不同房）
 
     for scroll_round in range(8):
-        # 每个房源卡片有 tv_house_info(户型/面积) 和 fl_price(价格)
-        infos = d().find_elements(AppiumBy.ID, "com.homelink.android:id/tv_house_info")
+        try:
+            infos = d().find_elements(AppiumBy.ID, "com.homelink.android:id/tv_house_info")
+        except WebDriverException:
+            reconnect_driver()
+            infos = d().find_elements(AppiumBy.ID, "com.homelink.android:id/tv_house_info")
         prices = d().find_elements(AppiumBy.ID, "com.homelink.android:id/fl_price")
 
         for info_el, price_el in zip(infos, prices):
@@ -243,13 +263,9 @@ def main():
     for community in communities:
         logger.info(f"\n\n正在获取: {community}")
 
-        # 导航到搜索页
+        # 设置目标小区，先到搜索页再搜索进入小区列表
+        sm.context["community"] = community
         sm.goto("search_input")
-
-        # 输入小区名、点击建议 → 进入 community_list
-        search_community(community)
-
-        # 确认到达小区列表页
         sm.goto("community_list")
 
         # 排序: 总价从低到高
