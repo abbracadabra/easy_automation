@@ -54,18 +54,6 @@ def d():
     return driver
 
 
-def reconnect_driver():
-    """UiAutomator2 server 崩溃时重建 session"""
-    global driver
-    if driver:
-        try:
-            driver.quit()
-        except Exception:
-            pass
-        driver = None
-    return create_driver()
-
-
 # ============================================================
 # Matchers — 顺序即优先级
 # ============================================================
@@ -106,7 +94,7 @@ def click_search_bar_community():
 
 def search_and_select_community():
     """搜索 → 小区列表: 从 context 读小区名，输入并点击建议项"""
-    name = get_context()["community"]
+    name = get_context()["xiaoqu"]
     inp = d().find_element(AppiumBy.ID, "com.homelink.android:id/et_search")
     inp.clear()
     time.sleep(0.5)
@@ -165,10 +153,10 @@ def fallback():
 GRAPH = {
     "states": {
         "login":          {"matchers": ["is_login"]},
-        "main_page":      {"matchers": ["is_main_page"]},
-        "search_input":   {"matchers": ["is_search_input"]},
-        "community_list": {"matchers": ["is_community_list"]},
-        "ershoufang":     {"matchers": ["is_ershoufang"]},
+        "main_page":      {"matchers": ["is_main_page"]}, # 链家主页
+        "search_input":   {"matchers": ["is_search_input"]}, # 搜索输入
+        "community_list": {"matchers": ["is_community_list"]}, # 小区房源列表
+        "ershoufang":     {"matchers": ["is_ershoufang"]}, # 二手房首页
     },
     "transitions": [
         {"from": "main_page",      "action": "click_ershoufang_entry",     "possible_targets": ["ershoufang"]},
@@ -200,11 +188,7 @@ FUNCTIONS = {
 # ============================================================
 def sort_by_price_low_to_high():
     """点排序 → 总价从低到高"""
-    try:
-        d().find_element(AppiumBy.XPATH, '//*[@text="排序"]').click()
-    except WebDriverException:
-        reconnect_driver()
-        d().find_element(AppiumBy.XPATH, '//*[@text="排序"]').click()
+    d().find_element(AppiumBy.XPATH, '//*[@text="排序"]').click()
     time.sleep(1)
     d().find_element(AppiumBy.XPATH, '//*[contains(@text, "总价从低到高")]').click()
     time.sleep(2)
@@ -216,11 +200,7 @@ def scrape_top_prices(n: int = 10):
     seen_titles = set()  # 用标题去重（同价不同房）
 
     for scroll_round in range(8):
-        try:
-            infos = d().find_elements(AppiumBy.ID, "com.homelink.android:id/tv_house_info")
-        except WebDriverException:
-            reconnect_driver()
-            infos = d().find_elements(AppiumBy.ID, "com.homelink.android:id/tv_house_info")
+        infos = d().find_elements(AppiumBy.ID, "com.homelink.android:id/tv_house_info")
         prices = d().find_elements(AppiumBy.ID, "com.homelink.android:id/fl_price")
 
         for info_el, price_el in zip(infos, prices):
@@ -251,7 +231,7 @@ def scrape_top_prices(n: int = 10):
 # 主流程
 # ============================================================
 def main():
-    communities = ["远东君悦庭", "城开珑庭"]
+    xiaoqu_list = ["远东君悦庭", "城开珑庭"]
     all_results = {}
 
     create_driver()
@@ -260,11 +240,11 @@ def main():
     sm.set_fallback(fallback)
     sm.validate()
 
-    for community in communities:
-        logger.info(f"\n\n正在获取: {community}")
+    for xiaoqu in xiaoqu_list:
+        logger.info(f"\n\n正在获取: {xiaoqu}")
 
         # 设置目标小区，先到搜索页再搜索进入小区列表
-        sm.context["community"] = community
+        sm.context["xiaoqu"] = xiaoqu
         sm.goto("search_input")
         sm.goto("community_list")
 
@@ -273,8 +253,8 @@ def main():
 
         # 抓取前10个价格
         prices = scrape_top_prices(10)
-        all_results[community] = prices
-        logger.info(f"{community}: 获取到 {len(prices)} 条")
+        all_results[xiaoqu] = prices
+        logger.info(f"{xiaoqu}: 获取到 {len(prices)} 条")
 
     # 输出结果
     print("\n" + "=" * 60)
