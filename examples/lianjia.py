@@ -87,12 +87,12 @@ def click_search_bar_home():
     d().find_element(AppiumBy.ID, "com.homelink.android:id/fl_search_text_container").click()
     time.sleep(1)
 
-def click_search_bar_community():
+def click_search_bar_xiaoqu():
     """小区列表 → 搜索: 点击搜索栏"""
     d().find_element(AppiumBy.ID, "com.homelink.android:id/rl_search").click()
     time.sleep(1)
 
-def search_and_select_community():
+def clear_and_search_xiaoqu():
     """搜索 → 小区列表: 从 context 读小区名，输入并点击建议项"""
     name = get_context()["xiaoqu"]
     inp = d().find_element(AppiumBy.ID, "com.homelink.android:id/et_search")
@@ -109,7 +109,7 @@ def search_and_select_community():
     suggestions[0].click()
     time.sleep(3)
 
-def click_cancel_search():
+def click_cancel():
     """搜索 → 返回上一页"""
     d().find_element(AppiumBy.XPATH, '//*[@text="取消"]').click()
     time.sleep(1)
@@ -161,9 +161,9 @@ GRAPH = {
     "transitions": [
         {"from": "main_page",      "action": "click_ershoufang_entry",     "possible_targets": ["ershoufang_main_page"]},
         {"from": "ershoufang_main_page",     "action": "click_search_bar_home",      "possible_targets": ["search_input"]},
-        {"from": "ershoufang_list", "action": "click_search_bar_community", "possible_targets": ["search_input"]},
-        {"from": "search_input",   "action": "search_and_select_community", "possible_targets": ["ershoufang_list"]},
-        {"from": "search_input",   "action": "click_cancel_search",        "possible_targets": ["ershoufang_main_page", "ershoufang_list"]},
+        {"from": "ershoufang_list", "action": "click_search_bar_xiaoqu", "possible_targets": ["search_input"]},
+        {"from": "search_input",   "action": "clear_and_search_xiaoqu", "possible_targets": ["ershoufang_list"]},
+        {"from": "search_input",   "action": "click_cancel",        "possible_targets": ["ershoufang_main_page", "ershoufang_list"]},
         {"from": "ershoufang_list", "action": "press_back",                 "possible_targets": ["ershoufang_main_page", "search_input"]},
     ],
 }
@@ -176,9 +176,9 @@ FUNCTIONS = {
     "is_ershoufang":                is_ershoufang,
     "click_ershoufang_entry":       click_ershoufang_entry,
     "click_search_bar_home":        click_search_bar_home,
-    "click_search_bar_community":   click_search_bar_community,
-    "search_and_select_community":  search_and_select_community,
-    "click_cancel_search":          click_cancel_search,
+    "click_search_bar_xiaoqu":      click_search_bar_xiaoqu,
+    "clear_and_search_xiaoqu":      clear_and_search_xiaoqu,
+    "click_cancel":                 click_cancel,
     "press_back":                   press_back,
 }
 
