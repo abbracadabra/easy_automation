@@ -27,7 +27,7 @@ states定义状态和condition, 执行引擎循环执行
 
 ---  
   
-解决死循环
+解决死循环  
 state entry_times 计数器, 一个state entry了n次, 则路径规划时排除掉next state是它的路径, 如果无路径则raise异常  
 
 ---
